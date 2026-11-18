@@ -134,29 +134,34 @@ function App(){
     const first=sortTable(game.clubs.filter(c=>c.league==='first'))
     const a=sortTable(game.clubs.filter(c=>c.league==='secondA'))
     const b=sortTable(game.clubs.filter(c=>c.league==='secondB'))
-    const bots=first.filter(c=>c.isBot).sort((x,y)=>sortTable(first).findIndex(c=>c.id===y.id)-sortTable(first).findIndex(c=>c.id===x.id))
+    const bots=first.filter(c=>c.isBot)
     const relegated=new Set<string>()
-    if(bots.length>=4)bots.slice(0,3).forEach(c=>relegated.add(c.id))
-    else {
+    if(bots.length>=4){
+      // Four or more bots: only the three lowest-ranked bots go down.
+      bots.slice(-3).forEach(c=>relegated.add(c.id))
+    } else {
+      // Fewer than four bots: every bot goes down, then the weakest humans fill the three slots.
       bots.forEach(c=>relegated.add(c.id))
-      for(const c of [...first].reverse())if(relegated.size<3&&!c.isBot)relegated.add(c.id)
+      for(const c of [...first].reverse()){
+        if(relegated.size>=3)break
+        if(!c.isBot)relegated.add(c.id)
+      }
     }
-    const promoted=[a[0],b[0]]
     const playoffWinner=Math.random()<0.5?a[1]:b[1]
-    promoted.push(playoffWinner)
+    const promoted=[a[0],b[0],playoffWinner]
     const promotedIds=new Set(promoted.map(c=>c.id))
-    const available=game.clubs.filter(c=>c.league!=='first'&&!promotedIds.has(c.id)).sort((x,y)=>y.points-x.points)
-    const newFirst=game.clubs.map(c=>({...c,league:relegated.has(c.id)?(Math.random()<.5?'secondA':'secondB'):promotedIds.has(c.id)?'first':c.league,points:0,played:0,wins:0,draws:0,losses:0,gf:0,ga:0}))
-    const currentFirstCount=newFirst.filter(c=>c.league==='first').length
-    const candidates=available.filter(c=>!relegated.has(c.id))
-    for(const c of candidates){if(newFirst.filter(x=>x.league==='first').length>=10)break;c.league='first'}
-    // Normalize second divisions back to ten clubs each.
-    const firstNow=newFirst.filter(c=>c.league==='first')
-    const secondA=newFirst.filter(c=>c.league==='secondA'),secondB=newFirst.filter(c=>c.league==='secondB')
-    while(secondA.length>10){const c=secondA.pop()!;c.league='secondB';}
-    while(secondB.length>10){const c=secondB.pop()!;c.league='secondA';}
-    while(secondA.length<10){const c=firstNow.find(x=>x.league==='first'&&!promotedIds.has(x.id));if(!c)break;c.league='secondA';}
-    setGame(g=>({...g,season:g.season+1,matchday:1,clubs:newFirst,transferLog:[`Seizoen ${g.season} afgerond. Promotieplay-off gewonnen door ${playoffWinner.name}.`,...g.transferLog]}))
+    const next=game.clubs.map(c=>({
+      ...c,
+      league: promotedIds.has(c.id)?'first' as LeagueId : relegated.has(c.id)?'secondA' as LeagueId : c.league,
+      points:0,played:0,wins:0,draws:0,losses:0,gf:0,ga:0
+    }))
+    // Place relegated clubs in the smaller second division, keeping both at ten.
+    for(const id of relegated){
+      const target=next.filter(c=>c.league==='secondA').length<=next.filter(c=>c.league==='secondB').length?'secondA':'secondB'
+      const item=next.find(c=>c.id===id)
+      if(item)item.league=target
+    }
+    setGame(g=>({...g,season:g.season+1,matchday:1,clubs:next,transferLog:[`Seizoen ${g.season} afgerond. Play-off gewonnen door ${playoffWinner.name}.`,...g.transferLog]}))
     setNotice(`Nieuw seizoen gestart. Promovendi: ${promoted.map(c=>c.name).join(', ')}. Play-off: ${playoffWinner.name}.`)
   }
   const market=useMemo(()=>Array.from({length:8},(_,i)=>{const p=player(i+5,30+i);return {...p,id:`market-${i}`,name:`${pick(firstNames)} ${pick(lastNames)}`,value:Math.round(p.value*.8)}}),[game.season])

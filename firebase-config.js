@@ -1,10 +1,11 @@
 // Vul hier de webconfiguratie van je Firebase-project in (Firebase Console → Projectinstellingen → Je apps → Webapp).
 // Deze waarden zijn projectidentificatiegegevens, geen wachtwoorden of servergeheimen.
-export const firebaseConfig = {
-  apiKey: 'VUL_HIER_API_KEY_IN',
-  authDomain: 'VUL_HIER_PROJECT.firebaseapp.com',
-  projectId: 'VUL_HIER_PROJECT_ID',
-  storageBucket: 'VUL_HIER_PROJECT.firebasestorage.app',
-  messagingSenderId: 'VUL_HIER_MESSAGING_SENDER_ID',
-  appId: 'VUL_HIER_APP_ID'
+const firebaseConfig = {
+  apiKey: "AIzaSyB919F9HeJfnywDGdC5dy_P72g8cJD2wUg",
+  authDomain: "football-manager-fm.firebaseapp.com",
+  projectId: "football-manager-fm",
+  storageBucket: "football-manager-fm.firebasestorage.app",
+  messagingSenderId: "1047046137510",
+  appId: "1:1047046137510:web:a710886dff48d269f5b667",
+  measurementId: "G-F4W3Y8VGJ0"
 };

@@ -15,5 +15,19 @@ service cloud.firestore {
     match /matches/{matchId} {
       allow read, write: if signedIn();
     }
+    // Afgeschermde testomgeving: enkel het toegelaten Firebase-account.
+    function allowedTestUser() {
+      return signedIn() && request.auth.token.email == 'vanherzeelematteo@gmail.com';
+    }
+    match /testUsers/{uid} {
+      allow read, create: if allowedTestUser() && request.auth.uid == uid;
+      allow update, delete: if false;
+    }
+    match /testWorld/{docId} {
+      allow read, write: if allowedTestUser();
+    }
+    match /testMatches/{matchId} {
+      allow read, write: if allowedTestUser();
+    }
   }
 }

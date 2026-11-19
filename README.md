@@ -38,3 +38,13 @@ De Firestore-regels laten ingelogde spelers gedeelde competitiegegevens schrijve
 - Financiën: beginsaldo, sponsor- en stadioninkomsten, lonen en trainingskosten worden bijgehouden.
 
 Dit blijft een prototype. Spelerskern en ratings zijn voorlopig vereenvoudigd: er zijn nog geen transfers, contracten, jeugdopleiding, stadionuitbreiding of betrouwbare server-side competitieverwerking. Omdat de game client-only is, zijn tactiek, training en geld niet beschermd tegen manipulatie door ingelogde gebruikers.
+
+## Uitgebreide managementmodules
+- Spelerskern met rating, leeftijd, positie, waarde en contractduur.
+- Basiself: spelers kunnen geselecteerd of op de bank gezet worden; maximaal 11 starters.
+- Transfermarkt: reserves aanbieden, een speler van een andere club kopen en bedragen verrekenen.
+- Jeugdopleiding: één jeugdspeler per seizoen rekruteren met hoger groeipotentieel.
+- Stadion: uitbreiden tot niveau 10, met stijgende inkomsten en capaciteit.
+- De wedstrijdsterkte gebruikt de geselecteerde basiself wanneer exact 11 starters geselecteerd zijn.
+
+Let op: deze modules zijn prototype-logica die door de browser wordt uitgevoerd. Transacties zijn niet veilig voor een openbare competitie omdat Firestore-regels alle ingelogde gebruikers schrijfrechten op de gedeelde wereld geven. Er is nog geen contractonderhandeling, spelervermoeidheid/herstelcyclus, volledige positiegebonden match engine of veilige servercontrole.

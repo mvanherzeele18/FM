@@ -1,49 +1,31 @@
-# Football Manager (FM)
+# Football Manager (FM) — Volledige Versie 1.0
 
-Een Nederlandstalige voetbalmanager-prototype met React, TypeScript en Vite. De app bevat een democompetitie met 30 clubs, drie reeksen, clubbeheer en een korte wedstrijdsimulator.
+Een Nederlandstalige voetbalmanager-webapplicatie met React, TypeScript, Vite en Firebase Cloud Firestore (inclusief gedeelde online multiplayerwereld en lokale demomodus).
 
-## Starten op je computer
+## Snel starten op je computer
 
 1. Installeer Node.js (LTS): https://nodejs.org/
-2. Download/clone deze repository.
-3. Open een terminal in de map en voer uit:
+2. Pak de map uit en open een terminal in deze map:
 
 ```bash
 npm install
 npm run dev
 ```
 
-4. Open de lokale URL die Vite in de terminal toont.
+3. Open de lokale URL die Vite toont. Zonder `.env` speel je direct in de volledige lokale carrièremodus.
 
-Zonder Firebase-instellingen werkt de app in demomodus en wordt je save lokaal in de browser bewaard.
-
-## Firebase instellen (optioneel voor deze prototypeversie)
+## Firebase instellen voor Online Multiplayer
 
 1. Maak een project aan via https://console.firebase.google.com/
-2. Activeer Authentication → Sign-in method → Email/Password.
-3. Maak een Cloud Firestore-database aan.
-4. Kopieer de web-app configuratie naar een nieuw bestand `.env` op basis van `.env.example`.
-5. Publiceer de inhoud van `firestore.rules` bij Firestore → Rules.
-6. Herstart `npm run dev`.
+2. Activeer **Authentication → Sign-in method → Email/Password**.
+3. Maak een **Cloud Firestore-database** aan.
+4. Kopieer `.env.example` naar `.env` en vul je 6 `VITE_FIREBASE_*` sleutels in.
+5. Publiceer `firestore.rules` bij **Firestore → Rules** (of via `firebase deploy --only firestore:rules`).
+6. Herstart `npm run dev` (of voeg de secrets toe in GitHub Actions voor GitHub Pages).
 
-Wanneer Firebase is geconfigureerd, kun je registreren/inloggen en wordt je persoonlijke save bewaard in `users/{uid}/saves/main`.
+## Wat er in deze volledige versie is opgelost en gebouwd
 
-## Inbegrepen in versie 0.1
-
-- Dashboard met clubkas, clubrating en volgende wedstrijd.
-- Eerste Klasse, Tweede Klasse A en Tweede Klasse B, elk met tien clubs.
-- Klassementen met punten, gespeelde wedstrijden en doelsaldo.
-- Spelerskern met basis/reserve-selectie en spelersdetails.
-- Tactiekkeuze en formaties.
-- Training met fitheid, moraal en rating.
-- Transfermarkt met fictieve spelers en aankopen/verkopen.
-- Clubfinanciën en stadionuitbreiding.
-- Wedstrijdsimulator: 90 wedstrijdminuten in vijf echte minuten zolang de pagina open blijft.
-- Seizoensafsluiting: kampioenen van Tweede Klasse A en B promoveren; de nummers twee spelen een willekeurige prototype-play-off.
-- Botregel: bij minder dan vier bots in Eerste Klasse degraderen alle bots en vullen de zwakst geklasseerde mensen de drie plaatsen aan; bij vier of meer bots degraderen de drie laagst geklasseerde bots. Bots kunnen ook promoveren.
-
-## Wat nog niet af is
-
-Dit is een speelbare **single-manager prototype**, geen afgewerkte online multiplayergame. Elke manager heeft momenteel een eigen save; verschillende accounts delen nog niet dezelfde competitie. Wedstrijden tussen andere clubs, een volledig speelschema, servergestuurde simulatie, dagelijkse automatische speeldagen, veilige server-side transfers en een echte multiplayerpromotie/degradatie moeten nog worden gebouwd. De huidige wedstrijdsimulator draait in de browser en stopt wanneer je de pagina sluit.
-
-Voor een publieke multiplayergame moeten belangrijke spelregels server-side worden afgedwongen met bijvoorbeeld Firebase Cloud Functions en geplande taken. Deel nooit Firebase-beheerderssleutels of wachtwoorden in de repository.
+- **Volledig speelschema (18 speeldagen per seizoen)**: Heen- en terugronde voor alle 30 clubs verdeeld over *Eerste Klasse*, *Tweede Klasse A* en *Tweede Klasse B*. Alle 15 wedstrijden per speeldag worden gesimuleerd en verwerkt in het klassement en topschuttersklassement.
+- **Online Multiplayer via Firestore**: Accounts delen dezelfde competitiewereld (`worlds/belgium-pro-league-1`). Bij registratie kies je een beschikbare botclub en neem je die over. Alle acties en speeldagen verlopen via veilige Firestore-transacties (`firestore.rules` inbegrepen).
+- **Realistische wedstrijdengine**: Houdt rekening met basiself, positie-overeenkomst met gekozen formatie (`4-3-3`, `4-4-2`, `3-5-2`, `5-3-2`), speelstijl, fitheid, moraal, doelpuntenmakers, assists, gele kaarten en live snelheidsregeling (`1x`, `5x`, `30x`).
+- **Volledige economie, jeugd & seizoenscyclus**: Ticketinkomsten op basis van stadioncapaciteit en ticketprijs, sponsorinkomsten, spelerslonen, stadionuitbreidingen, jaarlijkse veroudering/groei van spelers, jeugddoorstroom en de exacte promotie/degradatie- en botregels.

@@ -23,7 +23,9 @@ De configuratie staat in `firebase-config.js`. De competitie wordt bij het eerst
 - Clubs starten in Tweede Klasse A/B.
 - De laatste drie van Eerste Klasse degraderen.
 - De kampioenen van Tweede Klasse A/B promoveren; de nummers twee spelen een promotie-play-off.
-- Wedstrijden worden ongeveer elke 15 seconden bijgewerkt zolang minstens één manager de site open heeft.
+- Speeldagen starten automatisch om 18:00 uur Belgische tijd (Europe/Brussels), zodra minstens één manager de site open heeft.
+- Elke wedstrijd duurt 90 wedstrijdminuten, versneld tot ongeveer 5 echte minuten.
+- De browser werkt de wedstrijdsimulatie bij; zonder geopende site kan de aftrap niet exact op de klok automatisch plaatsvinden.
 
 ## Belangrijke beperking
 De Firestore-regels laten ingelogde spelers gedeelde competitiegegevens schrijven zodat de client-only versie kan functioneren. Dit is niet fraudebestendig. Voor automatische, betrouwbare simulatie op de server is een serverfunctie of andere vertrouwde backend onvermijdelijk.

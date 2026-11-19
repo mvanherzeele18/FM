@@ -2,6 +2,9 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
+    function allowedTestUser() {
+      return signedIn() && request.auth.token.email == 'vanherzeelematteo@gmail.com';
+    }
     match /users/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
       allow create: if signedIn() && request.auth.uid == uid;
@@ -15,16 +18,16 @@ service cloud.firestore {
     match /matches/{matchId} {
       allow read, write: if signedIn();
     }
-    // Separate collections for the test branch; production data stays untouched.
+    // Testomgeving: enkel het expliciet toegelaten Firebase-account.
     match /testUsers/{uid} {
-      allow read, create: if signedIn() && request.auth.uid == uid;
+      allow read, create: if allowedTestUser() && request.auth.uid == uid;
       allow update, delete: if false;
     }
     match /testWorld/{docId} {
-      allow read, write: if signedIn();
+      allow read, write: if allowedTestUser();
     }
     match /testMatches/{matchId} {
-      allow read, write: if signedIn();
+      allow read, write: if allowedTestUser();
     }
   }
 }

@@ -1,6 +1,5 @@
-// Vul hier de webconfiguratie van je Firebase-project in (Firebase Console → Projectinstellingen → Je apps → Webapp).
-// Deze waarden zijn projectidentificatiegegevens, geen wachtwoorden of servergeheimen.
-const firebaseConfig = {
+// Firebase web app configuration. This is public client configuration.
+export const firebaseConfig = {
   apiKey: "AIzaSyB919F9HeJfnywDGdC5dy_P72g8cJD2wUg",
   authDomain: "football-manager-fm.firebaseapp.com",
   projectId: "football-manager-fm",

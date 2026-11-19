@@ -4,15 +4,16 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     match /users/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
-      allow create, update, delete: if false;
+      allow create: if signedIn() && request.auth.uid == uid;
+      allow update, delete: if false;
     }
+    // Client-only game engine: signed-in users can update shared game state.
+    // This is suitable for a private prototype, NOT a cheat-resistant public league.
     match /world/{docId} {
-      allow read: if signedIn();
-      allow write: if false;
+      allow read, write: if signedIn();
     }
     match /matches/{matchId} {
-      allow read: if signedIn();
-      allow write: if false;
+      allow read, write: if signedIn();
     }
   }
 }

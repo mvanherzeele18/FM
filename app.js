@@ -15,11 +15,180 @@ function blankWorld(){const clubs=[];for(let i=0;i<30;i++)clubs.push(newBot("bot
 async function ensureWorldClient(){await runTransaction(db,async tx=>{const ref=doc(db,"world","main"),s=await tx.get(ref);if(!s.exists())tx.set(ref,blankWorld())})}
 function createFixtures(clubs,round){const out=[];for(const div of DIVS){const list=clubs.filter(c=>c.division===div).map(c=>c.id);if(list.length!==10)continue;for(let r=0;r<9;r++){const arr=list.slice();for(let n=0;n<r;n++){const last=arr.pop();arr.splice(1,0,last)}if(r===round%9)for(let i=0;i<5;i++){let home=arr[i],away=arr[9-i];if((r+i)%2)[home,away]=[away,home];if(round>=9)[home,away]=[away,home];out.push({homeId:home,awayId:away})}}}return out}
 function strength(c){const starters=(c.players||[]).filter(p=>p.starter),squad=starters.length===11?starters:(c.players||[]),avg=squad.reduce((n,p)=>n+p.rating,0)/Math.max(1,squad.length),t=c.tactics||{},shape={"4-3-3":[1,4,3,3],"4-4-2":[1,4,4,2],"3-5-2":[1,3,5,2],"5-3-2":[1,5,3,2],"4-2-3-1":[1,4,5,1],"3-4-3":[1,3,4,3]}[t.formation]||[1,4,3,3],counts=["GK","DEF","MID","ATT"].map(pos=>squad.filter(p=>p.position===pos).length),fit=shape.reduce((n,need,i)=>n+Math.min(need,counts[i]),0)/11,mental=t.mentality==="attacking"?1.035:t.mentality==="defensive"?.985:1,press=t.pressing==="high"?.99:t.pressing==="low"?.995:1,pass=t.passing==="direct"?1.008:t.passing==="short"?1.004:1;return avg*(.94+.06*fit)*mental*press*pass}
-async function call(name,data={}){await ensureWorldClient();const worldRef=doc(db,"world","main");if(name==="createClub"){const nm=String(data.name||"").trim(),lg=data.logo||"⚽";if(nm.length<3||nm.length>28)throw Error("De clubnaam moet 3 tot 28 tekens bevatten.");if(!["shield","round","diamond","stripe","star","chevron","monogram"].includes(lg))throw Error("Ongeldig embleem.");await runTransaction(db,async tx=>{const ur=doc(db,"users",user.uid),wr=await tx.get(worldRef),urS=await tx.get(ur);if(urS.exists())throw Error("Je hebt al een club.");const w=wr.data(),slot=w.clubs.find(c=>c.isBot&&c.division==="secondA")||w.clubs.find(c=>c.isBot&&c.division==="secondB")||w.clubs.find(c=>c.isBot&&c.division==="first");if(!slot)throw Error("Er is voorlopig geen vrije plaats.");const i=w.clubs.findIndex(c=>c.id===slot.id);w.clubs[i]={...slot,id:"club-"+user.uid,name:nm,logo:lg,logoColor,ownerUid:user.uid,isBot:false,players:makePlayers(user.uid).map((p,i)=>({...p,wage:650+(p.rating*22),contractYears:2,value:p.rating*6000,potential:Math.min(99,p.rating+8+(i%8))})),tactics:{formation:"4-3-3",mentality:"balanced",pressing:"normal",passing:"mixed"},trainingFocus:"balanced",trainingIntensity:"normal",balance:250000,sponsorIncome:18000,stadiumIncome:8000,weeklyWages:12000,trainingBudget:2500,lastTrainingDate:"",stadiumLevel:1,academyLevel:1,youthRecruitedSeason:0}};tx.set(worldRef,w);tx.set(ur,{uid:user.uid,email:user.email||"",clubId:"club-"+user.uid,clubName:nm,createdAt:Date.now()})});return{data:{ok:true}}}
-if(name==="startMatchday"){let result;await runTransaction(db,async tx=>{const s=await tx.get(worldRef);const w=s.data();if(w.phase!=="regular"||w.matchday>18)throw Error("Het reguliere seizoen is afgelopen.");if(!w.clubs.some(c=>c.ownerUid===user.uid))throw Error("Je hebt geen club.");const fixtures=createFixtures(w.clubs,w.matchday-1);if(fixtures.length!==15)throw Error("De competitie-indeling is niet volledig.");const id="s"+w.season+"-d"+w.matchday;const refs=fixtures.map((_,i)=>doc(db,"matches",id+"-"+i));const old=await Promise.all(refs.map(r=>tx.get(r)));if(old.some(s=>s.exists()))throw Error("Deze speeldag is al gestart.");const now=Date.now();fixtures.forEach((f,i)=>tx.set(refs[i],{...f,id:refs[i].id,season:w.season,matchday:w.matchday,status:"live",elapsed:0,homeGoals:0,awayGoals:0,events:[{minute:0,text:"De wedstrijd is begonnen."}],startedAt:now}));w.phase="live";tx.set(worldRef,w);result={started:true,matchday:w.matchday}});return{data:result}}
-if(name==="finishSeason"){let result;await runTransaction(db,async tx=>{const s=await tx.get(worldRef),w=s.data();if(w.phase!=="season-end")throw Error("Speel eerst alle 18 speeldagen.");const rank=d=>w.clubs.filter(c=>c.division===d).sort((a,b)=>b.points-a.points||(b.gf-b.ga)-(a.gf-a.ga)||b.gf-a.gf||a.name.localeCompare(b.name));const a=rank("secondA"),b=rank("secondB"),id="s"+w.season+"-playoff",ref=doc(db,"matches",id),old=await tx.get(ref);if(old.exists())throw Error("De promotie-play-off is al aangemaakt.");const m={id,type:"playoff",season:w.season,matchday:19,homeId:a[1].id,awayId:b[1].id,status:"live",elapsed:0,homeGoals:0,awayGoals:0,events:[{minute:0,text:"De promotie-play-off begint."}],startedAt:Date.now()};w.phase="playoff";w.playoff={homeId:a[1].id,awayId:b[1].id};tx.set(ref,m);tx.set(worldRef,w);result={started:true,home:a[1].name,away:b[1].name}});return{data:result}}
-if(name==="applySeasonResults"){let result;await runTransaction(db,async tx=>{const s=await tx.get(worldRef),w=s.data();if(w.phase!=="playoff-finished"||!w.playoffWinnerId)throw Error("De promotie-play-off is nog niet afgelopen.");const rank=d=>w.clubs.filter(c=>c.division===d).sort((a,b)=>b.points-a.points||(b.gf-b.ga)-(a.gf-a.ga)||b.gf-a.gf||a.name.localeCompare(b.name));const first=rank("first"),a=rank("secondA"),b=rank("secondB"),winner=w.clubs.find(c=>c.id===w.playoffWinnerId),promoted=[a[0],b[0],winner],relegated=first.slice(-3),n=winner.division==="secondA"?2:1;relegated.forEach((c,i)=>c.division=i<n?"secondA":"secondB");promoted.forEach(c=>c.division="first");w.clubs.forEach(c=>{Object.assign(c,{points:0,played:0,wins:0,draws:0,losses:0,gf:0,ga:0})});w.season++;w.matchday=1;w.phase="regular";delete w.playoff;delete w.playoffWinnerId;tx.set(worldRef,w);result={season:w.season,promoted:promoted.map(c=>c.name),relegated:relegated.map(c=>c.name),playoffWinner:winner.name}});return{data:result}}
-throw Error("Onbekende actie.");}
+async function call(name, data = {}) {
+  await ensureWorldClient();
+  const worldRef = doc(db, "world", "main");
+
+  if (name === "createClub") {
+    const nm = String(data.name || "").trim();
+    const lg = data.logo || "⚽";
+    if (nm.length < 3 || nm.length > 28) throw Error("De clubnaam moet 3 tot 28 tekens bevatten.");
+    if (!["shield", "round", "diamond", "stripe", "star", "chevron", "monogram"].includes(lg)) throw Error("Ongeldig embleem.");
+
+    await runTransaction(db, async tx => {
+      const ur = doc(db, "users", user.uid);
+      const wr = await tx.get(worldRef);
+      const urS = await tx.get(ur);
+      if (urS.exists()) throw Error("Je hebt al een club.");
+      const w = wr.data();
+      const slot = w.clubs.find(c => c.isBot && c.division === "secondA")
+        || w.clubs.find(c => c.isBot && c.division === "secondB")
+        || w.clubs.find(c => c.isBot && c.division === "first");
+      if (!slot) throw Error("Er is voorlopig geen vrije plaats.");
+
+      const i = w.clubs.findIndex(c => c.id === slot.id);
+      w.clubs[i] = {
+        ...slot,
+        id: "club-" + user.uid,
+        name: nm,
+        logo: lg,
+        logoColor,
+        ownerUid: user.uid,
+        isBot: false,
+        players: makePlayers(user.uid).map((p, index) => ({
+          ...p,
+          wage: 650 + (p.rating * 22),
+          contractYears: 2,
+          value: p.rating * 6000,
+          potential: Math.min(99, p.rating + 8 + (index % 8))
+        })),
+        tactics: { formation: "4-3-3", mentality: "balanced", pressing: "normal", passing: "mixed" },
+        trainingFocus: "balanced",
+        trainingIntensity: "normal",
+        balance: 250000,
+        sponsorIncome: 18000,
+        stadiumIncome: 8000,
+        weeklyWages: 12000,
+        trainingBudget: 2500,
+        lastTrainingDate: "",
+        stadiumLevel: 1,
+        academyLevel: 1,
+        youthRecruitedSeason: 0
+      };
+      tx.set(worldRef, w);
+      tx.set(ur, {
+        uid: user.uid,
+        email: user.email || "",
+        clubId: "club-" + user.uid,
+        clubName: nm,
+        createdAt: Date.now()
+      });
+    });
+    return { data: { ok: true } };
+  }
+
+  if (name === "startMatchday") {
+    let result;
+    await runTransaction(db, async tx => {
+      const snap = await tx.get(worldRef);
+      const w = snap.data();
+      if (w.phase !== "regular" || w.matchday > 18) throw Error("Het reguliere seizoen is afgelopen.");
+      if (!w.clubs.some(c => c.ownerUid === user.uid)) throw Error("Je hebt geen club.");
+      const fixtures = createFixtures(w.clubs, w.matchday - 1);
+      if (fixtures.length !== 15) throw Error("De competitie-indeling is niet volledig.");
+      const id = "s" + w.season + "-d" + w.matchday;
+      const refs = fixtures.map((_, i) => doc(db, "matches", id + "-" + i));
+      const old = await Promise.all(refs.map(ref => tx.get(ref)));
+      if (old.some(item => item.exists())) throw Error("Deze speeldag is al gestart.");
+      const now = Date.now();
+      fixtures.forEach((fixture, i) => {
+        tx.set(refs[i], {
+          ...fixture,
+          id: refs[i].id,
+          season: w.season,
+          matchday: w.matchday,
+          status: "live",
+          elapsed: 0,
+          homeGoals: 0,
+          awayGoals: 0,
+          events: [{ minute: 0, text: "De wedstrijd is begonnen." }],
+          startedAt: now
+        });
+      });
+      w.phase = "live";
+      tx.set(worldRef, w);
+      result = { started: true, matchday: w.matchday };
+    });
+    return { data: result };
+  }
+
+  if (name === "finishSeason") {
+    let result;
+    await runTransaction(db, async tx => {
+      const snap = await tx.get(worldRef);
+      const w = snap.data();
+      if (w.phase !== "season-end") throw Error("Speel eerst alle 18 speeldagen.");
+      const rank = division => w.clubs
+        .filter(c => c.division === division)
+        .sort((a, b) => b.points - a.points || (b.gf - b.ga) - (a.gf - a.ga) || b.gf - a.gf || a.name.localeCompare(b.name));
+      const a = rank("secondA");
+      const b = rank("secondB");
+      const id = "s" + w.season + "-playoff";
+      const ref = doc(db, "matches", id);
+      const old = await tx.get(ref);
+      if (old.exists()) throw Error("De promotie-play-off is al aangemaakt.");
+      const match = {
+        id,
+        type: "playoff",
+        season: w.season,
+        matchday: 19,
+        homeId: a[1].id,
+        awayId: b[1].id,
+        status: "live",
+        elapsed: 0,
+        homeGoals: 0,
+        awayGoals: 0,
+        events: [{ minute: 0, text: "De promotie-play-off begint." }],
+        startedAt: Date.now()
+      };
+      w.phase = "playoff";
+      w.playoff = { homeId: a[1].id, awayId: b[1].id };
+      tx.set(ref, match);
+      tx.set(worldRef, w);
+      result = { started: true, home: a[1].name, away: b[1].name };
+    });
+    return { data: result };
+  }
+
+  if (name === "applySeasonResults") {
+    let result;
+    await runTransaction(db, async tx => {
+      const snap = await tx.get(worldRef);
+      const w = snap.data();
+      if (w.phase !== "playoff-finished" || !w.playoffWinnerId) throw Error("De promotie-play-off is nog niet afgelopen.");
+      const rank = division => w.clubs
+        .filter(c => c.division === division)
+        .sort((a, b) => b.points - a.points || (b.gf - b.ga) - (a.gf - a.ga) || b.gf - a.gf || a.name.localeCompare(b.name));
+      const first = rank("first");
+      const a = rank("secondA");
+      const b = rank("secondB");
+      const winner = w.clubs.find(c => c.id === w.playoffWinnerId);
+      const promoted = [a[0], b[0], winner];
+      const relegated = first.slice(-3);
+      const n = winner.division === "secondA" ? 2 : 1;
+      relegated.forEach((club, index) => { club.division = index < n ? "secondA" : "secondB"; });
+      promoted.forEach(club => { club.division = "first"; });
+      w.clubs.forEach(club => {
+        Object.assign(club, { points: 0, played: 0, wins: 0, draws: 0, losses: 0, gf: 0, ga: 0 });
+      });
+      w.season++;
+      w.matchday = 1;
+      w.phase = "regular";
+      delete w.playoff;
+      delete w.playoffWinnerId;
+      tx.set(worldRef, w);
+      result = {
+        season: w.season,
+        promoted: promoted.map(club => club.name),
+        relegated: relegated.map(club => club.name),
+        playoffWinner: winner.name
+      };
+    });
+    return { data: result };
+  }
+
+  throw Error("Onbekende actie.");
+}
 function brusselsClock(){const parts=new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/Brussels",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date());const p=Object.fromEntries(parts.map(x=>[x.type,x.value]));return{date:p.year+"-"+p.month+"-"+p.day,hour:Number(p.hour),minute:Number(p.minute)}}
 let kickoffBusy=false;
 async function startScheduledMatchday(){if(!user||kickoffBusy)return;const clock=brusselsClock();if(clock.hour<18)return;kickoffBusy=true;try{await runTransaction(db,async tx=>{const snap=await tx.get(worldRefClient);if(!snap.exists())return;const w=snap.data();if(w.phase!=="regular"||w.matchday>18||w.lastKickoffDate===clock.date)return;const fixtures=createFixtures(w.clubs,w.matchday-1);if(fixtures.length!==15)throw Error("De competitie-indeling is niet volledig.");const id="s"+w.season+"-d"+w.matchday,refs=fixtures.map((_,i)=>doc(db,"matches",id+"-"+i)),old=await Promise.all(refs.map(r=>tx.get(r)));if(old.some(x=>x.exists())){w.lastKickoffDate=clock.date;tx.set(worldRefClient,w);return}const now=Date.now();fixtures.forEach((fixture,i)=>tx.set(refs[i],{...fixture,id:refs[i].id,season:w.season,matchday:w.matchday,status:"live",elapsed:0,homeGoals:0,awayGoals:0,events:[{minute:0,text:"Aftrap! De wedstrijd begint."}],startedAt:now}));w.phase="live";w.lastKickoffDate=clock.date;tx.set(worldRefClient,w)})}catch(e){console.error("Dagelijkse aftrap:",e)}finally{kickoffBusy=false}}
@@ -61,7 +230,8 @@ if(view==="lineup"){const selected=c.players.filter(p=>p.starter);body=`<section
 if(view==="market"){const market=world.market||[];body=`<section class="panel"><h2>Transfermarkt</h2><p class="sub">Koop spelers die andere clubs op de markt zetten. De transferprijs wordt rechtstreeks tussen clubs verrekend.</p>${market.length?market.map(x=>`<div class="market-row"><div><b>${esc(x.player.name)}</b><small>${esc(x.sellerName)} · ${x.player.position} · ${x.player.rating} ALG · ${x.player.age} jaar</small></div><strong>${euro(x.price)}</strong>${x.sellerId===c.id?'<span class="sub">Jouw speler</span>':`<button class="primary" data-buy="${x.id}">Kopen</button>`}</div>`).join(""):'<p class="empty">Er staan momenteel geen spelers te koop. Zet een reserve te koop vanuit je spelerskern.</p>'}</section><section class="panel"><h2>Jouw reserves verkopen</h2><p class="sub">Je kan alleen spelers aanbieden die niet in je basiself staan.</p>${c.players.filter(p=>!p.starter).map(p=>`<div class="market-row"><div><b>${esc(p.name)}</b><small>${p.position} · ${p.rating} ALG</small></div><strong>${euro(p.value||p.rating*6000)}</strong><button class="secondary" data-list-player="${p.id}">Te koop zetten</button></div>`).join("")}</section>`;}
 if(view==="youth"){const level=c.academyLevel||1;body=`<section class="panel"><h2>Jeugdopleiding</h2><div class="stats"><div><small>ACADEMY LEVEL</small><b>${level}</b></div><div><small>JEUGDREKRUTEN DIT SEIZOEN</small><b>${c.youthRecruitedSeason===world.season?1:0}/1</b></div></div><p>Jeugdspelers beginnen met een lager niveau, maar hebben groeipotentieel.</p><button class="primary" id="recruit-youth" ${c.youthRecruitedSeason===world.season?"disabled":""}>Rekruteer jeugdspeler · €25.000</button><p class="sub">Een jeugdspeler kost €25.000 en kan één keer per seizoen worden gerekruteerd.</p></section>`;}
 if(view==="stadium"){const level=c.stadiumLevel||1,capacity=5000+level*2000,cost=100000*level;body=`<section class="panel"><h2>Stadionbeheer</h2><div class="stats"><div><small>STADIONNIVEAU</small><b>${level}</b></div><div><small>CAPACITEIT</small><b>${capacity.toLocaleString("nl-BE")}</b></div><div><small>INKOMSTEN PER SPEELDAG</small><b>${euro(c.stadiumIncome||8000)}</b></div></div><p>Een groter stadion verhoogt je inkomsten op wedstrijddagen.</p><button class="primary" id="upgrade-stadium" ${level>=10||c.balance<cost?"disabled":""}>Uitbreiden · ${euro(cost)}</button><p class="sub">Maximaal niveau 10. Je saldo: ${euro(c.balance||250000)}</p></section>`;}
-\nif(view==="club"){body=`<section class="panel club-profile">${crest(c,true)}<div><h2>${esc(c.name)}</h2><p>${divName(c.division)} · Manager: ${esc(profile.email||"")}</p><p>${c.isBot?"Computerclub":"Persoonlijke club"}</p></div></section><section class="panel"><h2>Clubgegevens</h2><div class="detail"><span>Competitie</span><b>${divName(c.division)}</b></div><div class="detail"><span>Gespeeld</span><b>${c.played}</b></div><div class="detail"><span>Gewonnen / gelijk / verloren</span><b>${c.wins} / ${c.draws} / ${c.losses}</b></div><div class="detail"><span>Doelpunten</span><b>${c.gf} – ${c.ga}</b></div></section>`}
+
+if(view==="club"){body=`<section class="panel club-profile">${crest(c,true)}<div><h2>${esc(c.name)}</h2><p>${divName(c.division)} · Manager: ${esc(profile.email||"")}</p><p>${c.isBot?"Computerclub":"Persoonlijke club"}</p></div></section><section class="panel"><h2>Clubgegevens</h2><div class="detail"><span>Competitie</span><b>${divName(c.division)}</b></div><div class="detail"><span>Gespeeld</span><b>${c.played}</b></div><div class="detail"><span>Gewonnen / gelijk / verloren</span><b>${c.wins} / ${c.draws} / ${c.losses}</b></div><div class="detail"><span>Doelpunten</span><b>${c.gf} – ${c.ga}</b></div></section>`}
 $("#app").innerHTML=`<div class="layout"><aside class="sidebar"><div class="brand"><b>FM</b><span>FOOTBALL MANAGER</span></div><div class="club-chip">${crest(c)}<div><b>${esc(c.name)}</b><small>${divName(c.division)}</small></div></div><nav>${nav.map(([id,label])=>`<button data-view="${id}" class="${view===id?"active":""}">${label}</button>`).join("")}</nav><div class="side-bottom"><small>INGELOGD ALS</small><b>${esc(profile.email||"")}</b><button id="logout" class="link">Uitloggen</button></div></aside><main class="main"><header class="topbar"><div><small>ONLINE COMPETITIE</small><h1>${nav.find(x=>x[0]===view)?.[1]||"Overzicht"}</h1></div><span class="season-tag">Seizoen ${world.season}</span></header>${message?'<div class="notice">'+esc(message)+'</div>':""}${body}<footer>FM · Online clubmanager</footer></main></div>`;
 document.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>{view=b.dataset.view;message="";render()});
 $("#tactics-form")?.addEventListener("submit",async e=>{e.preventDefault();await saveClubPatch({tactics:Object.fromEntries(new FormData(e.currentTarget))},"Tactiek opgeslagen.")});
@@ -74,7 +244,8 @@ document.querySelectorAll("[data-list-player]").forEach(b=>b.onclick=async()=>{c
 document.querySelectorAll("[data-buy]").forEach(b=>b.onclick=async()=>{const id=b.dataset.buy;try{await runTransaction(db,async tx=>{const ref=doc(db,"world","main"),snap=await tx.get(ref),w=snap.data(),buyerIndex=w.clubs.findIndex(x=>x.ownerUid===user.uid),buyer=w.clubs[buyerIndex],listingIndex=(w.market||[]).findIndex(x=>x.id===id);if(buyerIndex<0||listingIndex<0)throw Error("Deze aanbieding is niet meer beschikbaar.");const listing=w.market[listingIndex];if(listing.sellerId===buyer.id)throw Error("Je kan je eigen speler niet kopen.");if((buyer.balance||0)<listing.price)throw Error("Onvoldoende saldo.");const sellerIndex=w.clubs.findIndex(x=>x.id===listing.sellerId);if(sellerIndex<0)throw Error("Verkopende club bestaat niet meer.");buyer.balance-=listing.price;buyer.players.push({...listing.player,starter:false});w.clubs[sellerIndex].balance=(w.clubs[sellerIndex].balance||0)+listing.price;w.market.splice(listingIndex,1);tx.set(ref,w)});notice("Transfer afgerond!")}catch(e){notice(e.message)}});
 $("#recruit-youth")?.addEventListener("click",async()=>{try{await runTransaction(db,async tx=>{const ref=doc(db,"world","main"),snap=await tx.get(ref),w=snap.data(),i=w.clubs.findIndex(x=>x.ownerUid===user.uid),club=w.clubs[i];if(club.youthRecruitedSeason===w.season)throw Error("Je hebt dit seizoen al een jeugdspeler gerekruteerd.");if((club.balance||0)<25000)throw Error("Onvoldoende saldo.");const n=(club.players||[]).length,positions=["GK","DEF","MID","ATT"],pos=positions[n%4],rating=42+(n*7%14),player={id:"youth-"+user.uid+"-"+w.season,name:["Sep","Milo","Rune","Otis","Lars","Jari","Nino","Bram"][n%8]+" "+["De Vos","Claes","Maes","Peeters","Willems","Jacobs"][n%6],position:pos,age:16,rating,stamina:100,morale:75,starter:false,wage:250,contractYears:3,value:rating*4000,potential:Math.min(99,rating+25)};club.balance-=25000;club.players.push(player);club.youthRecruitedSeason=w.season;tx.set(ref,w)});notice("Nieuwe jeugdspeler aangeworven.")}catch(e){notice(e.message)}});
 $("#upgrade-stadium")?.addEventListener("click",async()=>{try{await runTransaction(db,async tx=>{const ref=doc(db,"world","main"),snap=await tx.get(ref),w=snap.data(),i=w.clubs.findIndex(x=>x.ownerUid===user.uid),club=w.clubs[i],level=club.stadiumLevel||1,cost=100000*level;if(level>=10)throw Error("Je stadion is al maximaal uitgebreid.");if((club.balance||0)<cost)throw Error("Onvoldoende saldo.");club.balance-=cost;club.stadiumLevel=level+1;club.stadiumIncome=(club.stadiumIncome||8000)+2500;tx.set(ref,w)});notice("Stadion succesvol uitgebreid.")}catch(e){notice(e.message)}});
-\n$("#logout").onclick=()=>signOut(auth);
+
+$("#logout").onclick=()=>signOut(auth);
 $("#start-day")?.addEventListener("click",async()=>{const b=$("#start-day");b.disabled=true;b.textContent="Starten…";try{await call("startMatchday")}catch(e){notice(e.message)}});
 $("#finish-season")?.addEventListener("click",async()=>{const b=$("#finish-season");b.disabled=true;b.textContent="Play-off starten…";try{const r=await call("finishSeason");notice("Promotie-play-off gestart: "+r.data.home+" tegen "+r.data.away+". De wedstrijd duurt vijf minuten.")}catch(e){notice(e.message)}});$("#finish-new-season")?.addEventListener("click",async()=>{const b=$("#finish-new-season");b.disabled=true;b.textContent="Seizoen verwerken…";try{const r=await call("applySeasonResults");notice("Seizoen "+r.data.season+" gestart. Promotie: "+r.data.promoted.join(", ")+". Degradatie: "+r.data.relegated.join(", ")+". Play-offwinnaar: "+r.data.playoffWinner);view="leagues"}catch(e){notice(e.message)}});
 }

@@ -15,5 +15,16 @@ service cloud.firestore {
     match /matches/{matchId} {
       allow read, write: if signedIn();
     }
+    // Separate collections for the test branch; production data stays untouched.
+    match /testUsers/{uid} {
+      allow read, create: if signedIn() && request.auth.uid == uid;
+      allow update, delete: if false;
+    }
+    match /testWorld/{docId} {
+      allow read, write: if signedIn();
+    }
+    match /testMatches/{matchId} {
+      allow read, write: if signedIn();
+    }
   }
 }

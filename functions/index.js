@@ -20,5 +20,23 @@ function strength(c){return c.players.reduce((n,p)=>n+p.rating,0)/c.players.leng
 exports.tickMatches=onSchedule({schedule:"every 1 minutes",timeZone:"Europe/Brussels",maxInstances:1},async()=>{const snap=await MATCHES.where("status","==","live").get();for(const docSnap of snap.docs){await db.runTransaction(async tx=>{const ms=await tx.get(docSnap.ref);if(!ms.exists||ms.data().status!=="live")return;const ws=await tx.get(WORLD);const w=ws.data(),m=ms.data(),h=w.clubs.find(c=>c.id===m.homeId),a=w.clubs.find(c=>c.id===m.awayId);if(!h||!a)return;const minute=m.elapsed+1,events=[...(m.events||[])];const chance=Math.random()<0.48;if(chance){const home=Math.random()<0.52,att=home?h:a,def=home?a:h;const goal=Math.random()<Math.max(.12,Math.min(.65,.25+(strength(att)-strength(def))/180));if(goal){if(home)m.homeGoals++;else m.awayGoals++;events.push({minute,text:"DOELPUNT! "+att.name+" scoort."})}else events.push({minute,text:att.name+" krijgt een kans."})}else if(minute===5)events.push({minute,text:"De scheidsrechter fluit af."});m.elapsed=minute;m.events=events.slice(-12);if(minute>=5){m.status="finished";for(const [c,gf,ga] of [[h,m.homeGoals,m.awayGoals],[a,m.awayGoals,m.homeGoals]]){c.played++;c.gf+=gf;c.ga+=ga;if(gf>ga){c.wins++;c.points+=3}else if(gf===ga){c.draws++;c.points++}else c.losses++}}tx.set(ms.ref,m);if(minute>=5)tx.set(WORLD,w)})}
 const active=await MATCHES.where("status","==","live").get();if(active.empty){await db.runTransaction(async tx=>{const ws=await tx.get(WORLD);if(!ws.exists)return;const w=ws.data();if(w.phase==="live"){w.phase="regular";w.matchday++;if(w.matchday>18)w.phase="season-end";tx.set(WORLD,w)}})}});
 function ranking(w,div){return w.clubs.filter(c=>c.division===div).sort((a,b)=>b.points-a.points||(b.gf-b.ga)-(a.gf-a.ga)||b.gf-a.gf||a.name.localeCompare(b.name))}
-exports.finishSeason=onCall(async req=>{requireAuth(req);return db.runTransaction(async tx=>{const ws=await tx.get(WORLD),w=ws.data();if(w.phase!=="season-end")throw new HttpsError("failed-precondition","Speel eerst alle 18 speeldagen.");const first=ranking(w,"first"),a=ranking(w,"secondA"),b=ranking(w,"secondB");const promoted=[a[0],b[0]];const playoffWinner=(strength(a[1])+(Math.random()*12))> (strength(b[1])+(Math.random()*12))?a[1]:b[1];promoted.push(playoffWinner);const relegated=first.slice(-3);const target=playoffWinner.division;for(const c of relegated)c.division=target==="secondA"&&a[1].id===playoffWinner.id?"secondA":target==="secondB"&&b[1].id===playoffWinner.id?"secondB":c===relegated[2]?"secondA":"secondB";for(const c of promoted)c.division="first";const demotedCounts={secondA:relegated.filter(c=>c.division==="secondA").length,secondB:relegated.filter(c=>c.division==="secondB").length};for(const div of ["secondA","secondB"]){let group=w.clubs.filter(c=>c.division===div);while(group.length>10){const extra=group.filter(c=>c.isBot).sort((x,y)=>x.points-y.points)[0]||group.sort((x,y)=>x.points-y.points)[0];extra.division=div==="secondA"?"secondB":"secondA";group=w.clubs.filter(c=>c.division===div)}while(group.length<10){const other=div==="secondA"?"secondB":"secondA",spare=w.clubs.filter(c=>c.division===other&&c.isBot).sort((x,y)=>x.points-y.points)[0];if(!spare)break;spare.division=div;group=w.clubs.filter(c=>c.division===div)}}for(const c of w.clubs){c.points=c.played=c.wins=c.draws=c.losses=c.gf=c.ga=0}w.season++;w.matchday=1;w.phase="regular";tx.set(WORLD,w);return{season:w.season,promoted:promoted.map(c=>c.name),relegated:relegated.map(c=>c.name),playoffWinner:playoffWinner.name}})});
-exports.bootstrapWorld=onCall(async req=>{requireAuth(req);await ensureWorld();return{ok:true}});
+exports.finishSeason=onCall(async req=>{
+ requireAuth(req);
+ return db.runTransaction(async tx=>{
+  const ws=await tx.get(WORLD),w=ws.data();
+  if(w.phase!=="season-end")throw new HttpsError("failed-precondition","Speel eerst alle 18 speeldagen.");
+  const first=ranking(w,"first"),a=ranking(w,"secondA"),b=ranking(w,"secondB");
+  const playoffWinner=(strength(a[1])+(Math.random()*10))>(strength(b[1])+(Math.random()*10))?a[1]:b[1];
+  const promoted=[a[0],b[0],playoffWinner],relegated=first.slice(-3);
+  // Relegation fills the places vacated in each second division.
+  const relegationForA=playoffWinner.division==="secondA"?2:1;
+  relegated.forEach((club,i)=>club.division=i<relegationForA?"secondA":"secondB");
+  for(const club of promoted)club.division="first";
+  for(const c of w.clubs){
+   c.points=0;c.played=0;c.wins=0;c.draws=0;c.losses=0;c.gf=0;c.ga=0;
+  }
+  w.season++;w.matchday=1;w.phase="regular";
+  tx.set(WORLD,w);
+  return{season:w.season,promoted:promoted.map(c=>c.name),relegated:relegated.map(c=>c.name),playoffWinner:playoffWinner.name};
+ });
+});

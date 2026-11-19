@@ -1,25 +1,29 @@
-# FM — Football Manager
+# FM — Football Manager (Firebase-only prototype)
 
-Een eenvoudige online voetbalmanager in vanilla HTML, CSS en JavaScript met Firebase Authentication, Cloud Firestore en Cloud Functions.
+Deze versie gebruikt uitsluitend Firebase-diensten aan de applicatiekant:
+- Firebase Authentication: accounts met e-mail en wachtwoord.
+- Cloud Firestore: profielen, clubs, competities, uitslagen en wedstrijden.
+- Firebase Hosting: publicatie van de statische website vanuit GitHub.
 
-## Competitie
-- 3 reeksen met elk 10 clubs: Eerste Klasse, Tweede Klasse A en Tweede Klasse B.
-- Vrije plaatsen worden door fictieve computerclubs bezet.
-- Nieuwe managers maken een account aan, kiezen een clubnaam en embleem en starten in Tweede Klasse.
-- 18 speeldagen per seizoen. Alle 15 wedstrijden van een speeldag starten samen en lopen vijf minuten.
-- De server werkt wedstrijden elke minuut bij. Scores en standen worden gedeeld via Firestore.
-- De laatste drie van Eerste Klasse degraderen. De kampioenen van A en B promoveren; de nummers twee spelen een beslissende promotiewedstrijd.
+Er is geen Cloud Functions-backend en geen Node.js-runtime nodig voor de gamecode. De browser van een ingelogde speler voert de wedstrijdsimulatie uit zolang de website open staat. Daardoor is dit een prototype: een speler kan gedeelde gegevens manipuleren via de browser en wedstrijden pauzeren als niemand online is. Gebruik dit niet als veilige publieke competitie met prijzen of waardevolle accounts.
 
-## Firebase instellen
-1. Maak in Firebase Authentication de provider **E-mail/wachtwoord** actief.
-2. Maak een Cloud Firestore-database aan.
-3. Installeer Firebase CLI: `npm install -g firebase-tools` en meld aan met `firebase login`.
-4. Koppel dit project: `firebase use --add` en selecteer project `football-manager-fm`.
-5. Installeer backend dependencies: `cd functions && npm install && cd ..`.
-6. Deploy regels, functies en hosting: `firebase deploy`.
-7. Open de Hosting-URL en registreer een account.
+## Firebase Console instellen
+1. Open project `football-manager-fm`.
+2. Authentication → Sign-in method → activeer Email/Password.
+3. Firestore Database → maak een database aan.
+4. Firestore Rules → publiceer de inhoud van `firestore.rules`.
+5. Hosting → Get started / Set up Firebase Hosting.
+6. Koppel de GitHub-repository `mvanherzeele18/FM` aan de standaardbranch en publiceer de mapinhoud als statische site. Er is geen buildstap nodig; de publicatiemap is de repository-root.
 
-Cloud Functions en geplande functies vereisen doorgaans het Blaze-abonnement (facturatie ingeschakeld). De Firebase webconfiguratie in firebase-config.js is bedoeld voor de browser; beveiliging gebeurt met Authentication, Firestore Rules en serverfuncties.
+De configuratie staat in `firebase-config.js`. De competitie wordt bij het eerste gebruik aangemaakt in `world/main`.
 
-## Let op
-Dit is de eerste online speelbare basisversie. Wedstrijden lopen vijf servergestuurde minuten; de app toont live updates. De promotie/degradatie is server-side verwerkt. De volgende uitbreidingen kunnen spelersmarkt, trainingsschema, opstelling/tactiek en een echte clublogo-editor zijn.
+## Gameplay
+- 3 reeksen van 10 clubs, met fictieve computerclubs.
+- 18 speeldagen; 5 wedstrijden per reeks op elke speeldag.
+- Clubs starten in Tweede Klasse A/B.
+- De laatste drie van Eerste Klasse degraderen.
+- De kampioenen van Tweede Klasse A/B promoveren; de nummers twee spelen een promotie-play-off.
+- Wedstrijden worden ongeveer elke 15 seconden bijgewerkt zolang minstens één manager de site open heeft.
+
+## Belangrijke beperking
+De Firestore-regels laten ingelogde spelers gedeelde competitiegegevens schrijven zodat de client-only versie kan functioneren. Dit is niet fraudebestendig. Voor automatische, betrouwbare simulatie op de server is een serverfunctie of andere vertrouwde backend onvermijdelijk.

@@ -29,3 +29,12 @@ De configuratie staat in `firebase-config.js`. De competitie wordt bij het eerst
 
 ## Belangrijke beperking
 De Firestore-regels laten ingelogde spelers gedeelde competitiegegevens schrijven zodat de client-only versie kan functioneren. Dit is niet fraudebestendig. Voor automatische, betrouwbare simulatie op de server is een serverfunctie of andere vertrouwde backend onvermijdelijk.
+
+## Extra clubbeheer
+- Clubemblemen zijn vectorvormen (SVG) met zeven vormen en zes kleurkeuzes; er worden geen emoji-emblemen gebruikt voor nieuwe clubs.
+- De live wedstrijdpagina toont alleen de wedstrijd van de ingelogde manager. Afgewerkte andere uitslagen zijn zichtbaar bij Competities.
+- Tactieken: formatie, mentaliteit, pressing en passing; de basissterkteberekening houdt rekening met een deel van de gekozen instellingen.
+- Training: focus per linie en drie intensiteiten; spelersratings kunnen stijgen en training kost geld.
+- Financiën: beginsaldo, sponsor- en stadioninkomsten, lonen en trainingskosten worden bijgehouden.
+
+Dit blijft een prototype. Spelerskern en ratings zijn voorlopig vereenvoudigd: er zijn nog geen transfers, contracten, jeugdopleiding, stadionuitbreiding of betrouwbare server-side competitieverwerking. Omdat de game client-only is, zijn tactiek, training en geld niet beschermd tegen manipulatie door ingelogde gebruikers.

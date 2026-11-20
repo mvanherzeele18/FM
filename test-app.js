@@ -253,7 +253,24 @@ $("#clubname").oninput=e=>{clubNameDraft=e.target.value};$("#create-club").onsub
 function crest(c,large=false){const color=COLORS[c.logoColor||0]||COLORS[0],initials=(c.name||"FM").split(/\s+/).slice(0,2).map(x=>x[0]).join("").toUpperCase();const shapes={shield:"M5 4h38v23c0 9-9 15-19 19C14 42 5 36 5 27Z",round:"M24 3a21 21 0 1 0 0 42a21 21 0 1 0 0-42",diamond:"M24 2 46 24 24 46 2 24Z",stripe:"M5 4h38v40H5Z",star:"m24 2 6 14 16 2-12 10 3 16-13-8-13 8 3-16L2 18l16-2Z",chevron:"M3 4h42L24 45Z",monogram:"M5 5h38v38H5Z"};return `<svg class="crest-svg ${large?"large":""}" viewBox="0 0 48 48"><path d="${shapes[c.logo]||shapes.shield}" fill="${color}" stroke="#fff" stroke-width="2"/><text x="24" y="29" text-anchor="middle" font-size="13" font-weight="800" fill="#fff">${esc(initials)}</text></svg>`}
 async function saveClubPatch(patch,success){try{await runTransaction(db,async tx=>{const ref=doc(db,"testWorld","main"),snap=await tx.get(ref),w=snap.data(),i=w.clubs.findIndex(x=>x.ownerUid===user.uid);if(i<0)throw Error("Club niet gevonden.");w.clubs[i]={...w.clubs[i],...patch};tx.set(ref,w)});notice(success)}catch(e){notice(e.message)}}
 function standings(division){return (world?.clubs||[]).filter(c=>c.division===division).sort((a,b)=>b.points-a.points||(b.gf-b.ga)-(a.gf-a.ga)||b.gf-a.gf||a.name.localeCompare(b.name))}
-function table(division){const cs=standings(division);return `<div class="table-scroll"><table><thead><tr><th>#</th><th>Club</th><th>GS</th><th>W</th><th>G</th><th>V</th><th>DS</th><th>PT</th></tr></thead><tbody>${cs.map((c,i)=>`<tr class="${c.ownerUid===user.uid?"mine":""}"><td>${i+1}</td><td>${crest(c)}<b>${esc(c.name)}</b>${c.isBot?'<small class="bot">BOT</small>':""}</td><td>${c.played}</td><td>${c.wins}</td><td>${c.draws}</td><td>${c.losses}</td><td>${c.gf-c.ga}</td><td><b>${c.points}</b></td></tr>`).join("")}</tbody></table></div>`}
+function standingStatus(division,index,total){
+  const final=["season-end","playoff","playoff-finished"].includes(world.phase);
+  let label="",kind="";
+  if(division==="first"){
+    if(index===0){label=final?"KAMPIOEN":"KAMPIOENSPLAATS";kind="champion"}
+    else if(index>=Math.max(0,total-3)){label=final?"DEGRADEERT":"DEGRADATIEZONE";kind="danger"}
+  }else if(division==="secondA"||division==="secondB"){
+    if(index===0){label=final?"PROMOVEERT":"PROMOTIEPLAATS";kind="promote"}
+    else if(index===1){label=final?"PLAY-OFF":"PLAY-OFFPLAATS";kind="playoff"}
+  }
+  if(!label)return "";
+  const styles={champion:"background:#e7f1dc;color:#315d3b",promote:"background:#e2edf8;color:#28527a",playoff:"background:#f5edd9;color:#795b19",danger:"background:#f8e4e1;color:#963d35"};
+  return '<span style="display:inline-block;padding:4px 7px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.3px;'+styles[kind]+'">'+label+'</span>';
+}
+function table(division){
+  const cs=standings(division);
+  return '<div class="table-scroll"><table><thead><tr><th>#</th><th>Club</th><th>GS</th><th>W</th><th>G</th><th>V</th><th>DS</th><th>PT</th><th>SEIZOENSITUATIE</th></tr></thead><tbody>'+cs.map((c,i)=>'<tr class="'+(c.ownerUid===user.uid?"mine":"")+'"><td>'+(i+1)+'</td><td>'+crest(c)+'<b>'+esc(c.name)+'</b>'+(c.isBot?'<small class="bot">BOT</small>':"")+'</td><td>'+c.played+'</td><td>'+c.wins+'</td><td>'+c.draws+'</td><td>'+c.losses+'</td><td>'+(c.gf-c.ga)+'</td><td><b>'+c.points+'</b></td><td>'+standingStatus(division,i,cs.length)+'</td></tr>').join("")+'</tbody></table></div>';
+}
 function myClub(){return world?.clubs?.find(c=>c.ownerUid===user?.uid)}
 function liveMatches(){const current=matches.some(m=>m.season===world?.season&&m.matchday===world?.matchday&&m.status==="live");const day=world?.phase==="regular"&&world.matchday>1&&!current?world.matchday-1:world?.phase==="season-end"?18:world?.matchday;return matches.filter(m=>m.season===world?.season&&m.matchday===day)}
 function matchCard(m){const h=world.clubs.find(c=>c.id===m.homeId),a=world.clubs.find(c=>c.id===m.awayId);if(!h||!a)return"";return `<article class="match-card ${m.status}"><div class="match-team">${crest(h)}<b>${esc(h.name)}</b></div><div class="match-score"><strong>${m.homeGoals} – ${m.awayGoals}</strong><small>${m.status==="finished"?"FT":m.elapsed+"’ / 90’"}</small></div><div class="match-team away">${crest(a)}<b>${esc(a.name)}</b></div><div class="match-events">${(m.events||[]).slice(-3).map(e=>`<p><b>${e.minute}’</b> ${esc(e.text)}</p>`).join("")}</div></article>`}

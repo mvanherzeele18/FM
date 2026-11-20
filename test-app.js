@@ -47,6 +47,58 @@ function setBotMatchTactics(club,match){
   for(let i=0;i<key.length;i++)hash=Math.imul(hash^key.charCodeAt(i),16777619);
   club.tactics={...styles[(hash>>>0)%styles.length]};
 }
+function seededRandom(seed){
+  let h=2166136261;
+  for(const ch of String(seed)){h^=ch.charCodeAt(0);h=Math.imul(h,16777619);}
+  let state=h>>>0;
+  return ()=>{state=(state+0x6D2B79F5)>>>0;let t=state;t=Math.imul(t^(t>>>15),t|1);t^=t+Math.imul(t^(t>>>7),t|61);return((t^(t>>>14))>>>0)/4294967296;};
+}
+function simulateFixture(fixture,clubs,season,matchday,type="regular"){
+  const home=clubs.find(c=>c.id===fixture.homeId),away=clubs.find(c=>c.id===fixture.awayId);
+  if(!home||!away)throw Error("Een ploeg uit de wedstrijd bestaat niet.");
+  const match={...fixture,season,matchday,type};
+  const h={...home,tactics:{...(home.tactics||{})}},a={...away,tactics:{...(away.tactics||{})}};
+  setBotMatchTactics(h,match);setBotMatchTactics(a,match);
+  const random=seededRandom(season+"-"+matchday+"-"+fixture.homeId+"-"+fixture.awayId+"-"+type);
+  let homeGoals=0,awayGoals=0;
+  const events=[{minute:0,text:type==="playoff"?"De promotie-play-off begint.":"De wedstrijd is begonnen.",kind:"start"}];
+  for(let minute=1;minute<=90;minute++){
+    if(random()<.10){
+      const isHome=random()<.52,att=isHome?h:a,def=isHome?a:h,t=att.tactics||{};
+      const attackBonus=(t.mentality==="attacking"?.055:t.mentality==="defensive"?-.045:0)+(t.passing==="direct"?.018:t.passing==="short"?.008:0);
+      const goalChance=Math.max(.18,Math.min(.58,.32+(strength(att)-strength(def))/150+attackBonus));
+      if(random()<goalChance){
+        if(isHome)homeGoals++;else awayGoals++;
+        events.push({minute,text:"DOELPUNT! "+att.name+" scoort.",kind:"goal",teamId:att.id});
+      }else events.push({minute,text:att.name+" krijgt een kans.",kind:"chance"});
+    }
+    if(minute>=8&&random()<.012)events.push({minute,text:(random()<.5?h:a).name+" krijgt geel.",kind:"yellow"});
+    if(minute>=20&&minute<=80&&random()<.0015)events.push({minute,text:(random()<.5?h:a).name+" krijgt rood.",kind:"red"});
+    if([60,70,80].includes(minute)&&random()<.34)events.push({minute,text:(random()<.5?h:a).name+" voert een wissel door.",kind:"substitution"});
+  }
+  let penaltyScore=null,winnerId=null;
+  if(type==="playoff"){
+    if(homeGoals===awayGoals){
+      let hp=0,ap=0;
+      for(let kick=0;kick<5;kick++){if(random()<.72)hp++;if(random()<.72)ap++}
+      let sudden=0;
+      while(hp===ap&&sudden<20){if(random()<.72)hp++;if(random()<.72)ap++;sudden++}
+      if(hp===ap){if(random()<.5)hp++;else ap++}
+      penaltyScore={home:hp,away:ap};
+      events.push({minute:90,text:"Strafschoppen: "+h.name+" "+hp+" – "+ap+" "+a.name+".",kind:"penalties"});
+    }
+    winnerId=homeGoals>awayGoals?h.id:awayGoals>homeGoals?a.id:penaltyScore.home>penaltyScore.away?h.id:a.id;
+    events.push({minute:90,text:"Promotie voor "+clubs.find(c=>c.id===winnerId).name+"!",kind:"result"});
+  }
+  return {...fixture,id:null,season,matchday,type,status:"precomputed",elapsed:0,homeGoals:0,awayGoals:0,finalHomeGoals:homeGoals,finalAwayGoals:awayGoals,penaltyScore,winnerId,events,startedAt:Date.now(),durationMs:300000};
+}
+function matchProgress(m){
+  const elapsed=Math.max(0,Math.min(90,Math.floor((Date.now()-(m.startedAt||Date.now()))/((m.durationMs||300000)/90))));
+  const visibleEvents=(m.events||[]).filter(e=>e.minute<=elapsed);
+  const homeGoals=visibleEvents.filter(e=>e.kind==="goal"&&e.teamId===m.homeId).length;
+  const awayGoals=visibleEvents.filter(e=>e.kind==="goal"&&e.teamId===m.awayId).length;
+  return {...m,elapsed,homeGoals,awayGoals,status:elapsed>=90?"finished":"live",events:visibleEvents};
+}
 async function call(name, data = {}) {
   await ensureWorldClient();
   const worldRef = doc(db, "testWorld", "main");
@@ -122,24 +174,13 @@ async function call(name, data = {}) {
       const refs = fixtures.map((_, i) => doc(db, "testMatches", id + "-" + i));
       const old = await Promise.all(refs.map(ref => tx.get(ref)));
       if (old.some(item => item.exists())) throw Error("Deze speeldag is al gestart.");
-      const now = Date.now();
-      fixtures.forEach((fixture, i) => {
-        tx.set(refs[i], {
-          ...fixture,
-          id: refs[i].id,
-          season: w.season,
-          matchday: w.matchday,
-          status: "live",
-          elapsed: 0,
-          homeGoals: 0,
-          awayGoals: 0,
-          events: [{ minute: 0, text: "De wedstrijd is begonnen." }],
-          startedAt: now
-        });
-      });
+      const startedAt = Date.now();
+      const precomputed = fixtures.map((fixture,i)=>({...simulateFixture(fixture,w.clubs,w.season,w.matchday),id:refs[i].id,startedAt}));
+      precomputed.forEach((match,i)=>tx.set(refs[i],match));
       w.phase = "live";
+      w.matchdayStartedAt = startedAt;
       tx.set(worldRef, w);
-      result = { started: true, matchday: w.matchday };
+      result = { started: true, matchday: w.matchday, matches: precomputed.length };
     });
     return { data: result };
   }
@@ -159,22 +200,11 @@ async function call(name, data = {}) {
       const ref = doc(db, "testMatches", id);
       const old = await tx.get(ref);
       if (old.exists()) throw Error("De promotie-play-off is al aangemaakt.");
-      const match = {
-        id,
-        type: "playoff",
-        season: w.season,
-        matchday: 19,
-        homeId: a[1].id,
-        awayId: b[1].id,
-        status: "live",
-        elapsed: 0,
-        homeGoals: 0,
-        awayGoals: 0,
-        events: [{ minute: 0, text: "De promotie-play-off begint." }],
-        startedAt: Date.now()
-      };
+      const startedAt = Date.now();
+      const match = {...simulateFixture({homeId:a[1].id,awayId:b[1].id},w.clubs,w.season,19,"playoff"),id,startedAt};
       w.phase = "playoff";
       w.playoff = { homeId: a[1].id, awayId: b[1].id };
+      w.playoffStartedAt = startedAt;
       tx.set(ref, match);
       tx.set(worldRef, w);
       result = { started: true, home: a[1].name, away: b[1].name };
@@ -221,23 +251,59 @@ async function call(name, data = {}) {
 
   throw Error("Onbekende actie.");
 }
-async function advanceIfMatchesFinished(){
-  if(!world||world.phase!=="live")return;
-  const prefix="s"+world.season+"-d"+world.matchday+"-";
-  const dayMatches=matches.filter(m=>String(m.id).startsWith(prefix));
-  if(dayMatches.length!==15||!dayMatches.every(m=>m.status==="finished"))return;
-  await runTransaction(db,async tx=>{
-    const ws=await tx.get(worldRefClient);
-    if(!ws.exists())return;
-    const w=ws.data();
-    if(w.phase!=="live"||w.season!==world.season||w.matchday!==world.matchday)return;
-    w.phase="regular";
-    w.matchday++;
-    if(w.matchday>18)w.phase="season-end";
-    tx.set(worldRefClient,w);
-  });
+async function tickClientMatches(){
+  if(!user||tickBusy||!world)return;
+  const now=Date.now();
+  if(world.phase==="live"){
+    const prefix="s"+world.season+"-d"+world.matchday+"-";
+    const day=matches.filter(m=>String(m.id).startsWith(prefix));
+    if(day.length!==15||day.some(m=>now<(m.startedAt||now)+(m.durationMs||300000)))return;
+  }else if(world.phase==="playoff"){
+    const playoff=matches.find(m=>m.id==="s"+world.season+"-playoff");
+    if(!playoff||now<(playoff.startedAt||now)+(playoff.durationMs||300000))return;
+  }else return;
+  tickBusy=true;
+  try{
+    await runTransaction(db,async tx=>{
+      const ws=await tx.get(worldRefClient);
+      if(!ws.exists())return;
+      const w=ws.data();
+      if(w.phase==="live"){
+        const prefix="s"+w.season+"-d"+w.matchday+"-";
+        const refs=Array.from({length:15},(_,i)=>doc(db,"testMatches",prefix+i));
+        const snaps=await Promise.all(refs.map(ref=>tx.get(ref)));
+        if(snaps.some(x=>!x.exists()))return;
+        const day=snaps.map(x=>x.data());
+        if(day.some(m=>now<(m.startedAt||now)+(m.durationMs||300000)))return;
+        for(const m of day){
+          const h=w.clubs.find(c=>c.id===m.homeId),a=w.clubs.find(c=>c.id===m.awayId);
+          if(!h||!a)continue;
+          const hg=Number(m.finalHomeGoals||0),ag=Number(m.finalAwayGoals||0);
+          for(const [club,gf,ga] of [[h,hg,ag],[a,ag,hg]]){
+            club.played++;club.gf+=gf;club.ga+=ga;
+            if(gf>ga){club.wins++;club.points+=3}else if(gf===ga){club.draws++;club.points++}else club.losses++;
+          }
+          for(const club of [h,a])club.balance=(club.balance||250000)+(club.sponsorIncome||18000)+(club.stadiumIncome||8000)-(club.players||[]).reduce((sum,p)=>sum+(p.wage||0),club.weeklyWages||12000);
+        }
+        w.phase="regular";w.matchday++;delete w.matchdayStartedAt;
+        if(w.matchday>18)w.phase="season-end";
+        tx.set(worldRefClient,w);
+      }else if(w.phase==="playoff"){
+        const ref=doc(db,"testMatches","s"+w.season+"-playoff"),snap=await tx.get(ref);
+        if(!snap.exists())return;
+        const m=snap.data();
+        if(now<(m.startedAt||now)+(m.durationMs||300000))return;
+        if(!m.winnerId)return;
+        w.playoffWinnerId=m.winnerId;w.phase="playoff-finished";delete w.playoffStartedAt;
+        tx.set(worldRefClient,w);
+      }
+    });
+  }catch(e){console.error("Wedstrijddag afronden:",e)}
+  finally{tickBusy=false}
 }
-async function tickClientMatches(){if(!user||tickBusy)return;const live=matches.filter(m=>m.status==="live");if(!live.length){try{await advanceIfMatchesFinished()}catch(e){console.error("Speeldag afronden:",e)}return}tickBusy=true;let ownsLock=false;try{ownsLock=await runTransaction(db,async tx=>{const snap=await tx.get(simLockRef),lock=snap.exists()?snap.data():{},now=Date.now();if(lock.until>now&&lock.owner!==simOwnerId)return false;tx.set(simLockRef,{owner:simOwnerId,until:now+30000});return true});if(!ownsLock)return;for(const m0 of live){const ref=doc(db,"testMatches",m0.id);await runTransaction(db,async tx=>{const ms=await tx.get(ref);if(!ms.exists()||ms.data().status!=="live")return;const ws=await tx.get(worldRefClient);if(!ws.exists())return;const w=ws.data(),m=ms.data(),h=w.clubs.find(c=>c.id===m.homeId),a=w.clubs.find(c=>c.id===m.awayId);if(!h||!a)return;setBotMatchTactics(h,m);setBotMatchTactics(a,m);const minute=Math.min(90,Math.floor((Date.now()-m.startedAt)/(300000/90)));if(minute<=m.elapsed)return;const events=[...(m.events||[])];for(let gameMinute=m.elapsed+1;gameMinute<=minute;gameMinute++){if(Math.random()<.10){const home=Math.random()<.52,att=home?h:a,def=home?a:h,t=att.tactics||{},attackBonus=(t.mentality==="attacking"?.055:t.mentality==="defensive"?-.045:0)+(t.passing==="direct"?.018:t.passing==="short"?.008:0),goalChance=Math.max(.18,Math.min(.58,.32+(strength(att)-strength(def))/150+attackBonus));if(Math.random()<goalChance){if(home)m.homeGoals++;else m.awayGoals++;events.push({minute:gameMinute,text:"DOELPUNT! "+att.name+" scoort."})}else events.push({minute:gameMinute,text:att.name+" krijgt een kans."})}}m.elapsed=minute;m.events=events.slice(-12);if(minute>=90){m.status="finished";if(m.type==="playoff"){if(m.homeGoals===m.awayGoals){let hp=0,ap=0;for(let kick=0;kick<5;kick++){if(Math.random()<.72)hp++;if(Math.random()<.72)ap++}let sudden=0;while(hp===ap&&sudden<20){if(Math.random()<.72)hp++;if(Math.random()<.72)ap++;sudden++}if(hp===ap){if(Math.random()<.5)hp++;else ap++}m.penaltyScore={home:hp,away:ap}}m.winnerId=m.homeGoals>m.awayGoals?h.id:m.awayGoals>m.homeGoals?a.id:m.penaltyScore.home>m.penaltyScore.away?h.id:a.id;w.playoffWinnerId=m.winnerId;w.phase="playoff-finished"}else{for(const [c,gf,ga] of [[h,m.homeGoals,m.awayGoals],[a,m.awayGoals,m.homeGoals]]){c.played++;c.gf+=gf;c.ga+=ga;if(gf>ga){c.wins++;c.points+=3}else if(gf===ga){c.draws++;c.points++}else c.losses++}}for(const club of [h,a])club.balance=(club.balance||250000)+(club.sponsorIncome||18000)+(club.stadiumIncome||8000)-(club.players||[]).reduce((sum,p)=>sum+(p.wage||0),club.weeklyWages||12000);tx.set(worldRefClient,w)}if(m.type==="playoff"&&m.status==="finished"){if(m.penaltyScore)m.events.push({minute:90,text:"Strafschoppen: "+h.name+" "+m.penaltyScore.home+" – "+m.penaltyScore.away+" "+a.name+"."});m.events.push({minute:90,text:"Promotie voor "+w.clubs.find(c=>c.id===m.winnerId).name+"!"})}tx.set(ref,m)})}await advanceIfMatchesFinished();}catch(e){console.error("Matchsimulatie:",e)}finally{if(ownsLock){try{await runTransaction(db,async tx=>{const snap=await tx.get(simLockRef);if(snap.exists()&&snap.data().owner===simOwnerId)tx.set(simLockRef,{owner:null,until:0})})}catch(e){console.error("Simulatie-lock vrijgeven:",e)}}tickBusy=false}}const worldRefClient=doc(db,"testWorld","main"),simLockRef=doc(db,"testWorld","matchSimulationLock"),simOwnerId="tab-"+Math.random().toString(36).slice(2);let tickBusy=false;setInterval(tickClientMatches,5000);
+const worldRefClient=doc(db,"testWorld","main"),simLockRef=doc(db,"testWorld","matchSimulationLock"),simOwnerId="tab-"+Math.random().toString(36).slice(2);let tickBusy=false;
+setInterval(()=>{if(world&&(world.phase==="live"||world.phase==="playoff"))render();tickClientMatches()},1000);
+
 const ALLOWED_TEST_EMAIL="vanherzeelematteo@gmail.com";let authError="";let user=null,profile=null,world=null,matches=[],unsubWorld=null,unsubMatches=null,view="home",busy=false,message="",logo="shield";
 const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const euro=n=>new Intl.NumberFormat("nl-BE",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(n);
@@ -272,12 +338,12 @@ function table(division){
   return '<div class="table-scroll"><table><thead><tr><th>#</th><th>Club</th><th>GS</th><th>W</th><th>G</th><th>V</th><th>DS</th><th>PT</th><th>SEIZOENSITUATIE</th></tr></thead><tbody>'+cs.map((c,i)=>'<tr class="'+(c.ownerUid===user.uid?"mine":"")+'"><td>'+(i+1)+'</td><td>'+crest(c)+'<b>'+esc(c.name)+'</b>'+(c.isBot?'<small class="bot">BOT</small>':"")+'</td><td>'+c.played+'</td><td>'+c.wins+'</td><td>'+c.draws+'</td><td>'+c.losses+'</td><td>'+(c.gf-c.ga)+'</td><td><b>'+c.points+'</b></td><td>'+standingStatus(division,i,cs.length)+'</td></tr>').join("")+'</tbody></table></div>';
 }
 function myClub(){return world?.clubs?.find(c=>c.ownerUid===user?.uid)}
-function liveMatches(){const current=matches.some(m=>m.season===world?.season&&m.matchday===world?.matchday&&m.status==="live");const day=world?.phase==="regular"&&world.matchday>1&&!current?world.matchday-1:world?.phase==="season-end"?18:world?.matchday;return matches.filter(m=>m.season===world?.season&&m.matchday===day)}
-function matchCard(m){const h=world.clubs.find(c=>c.id===m.homeId),a=world.clubs.find(c=>c.id===m.awayId);if(!h||!a)return"";return `<article class="match-card ${m.status}"><div class="match-team">${crest(h)}<b>${esc(h.name)}</b></div><div class="match-score"><strong>${m.homeGoals} – ${m.awayGoals}</strong><small>${m.status==="finished"?"FT":m.elapsed+"’ / 90’"}</small>${m.penaltyScore?'<small>Strafschoppen '+m.penaltyScore.home+' – '+m.penaltyScore.away+'</small>':""}</div><div class="match-team away">${crest(a)}<b>${esc(a.name)}</b></div><div class="match-events">${(m.events||[]).slice(-3).map(e=>`<p><b>${e.minute}’</b> ${esc(e.text)}</p>`).join("")}</div></article>`}
+function liveMatches(){const day=world?.phase==="regular"&&world.matchday>1?world.matchday-1:world?.phase==="season-end"?18:world?.matchday;return matches.filter(m=>m.season===world?.season&&m.matchday===day).map(matchProgress)}
+function matchCard(raw){const m=raw.status==="precomputed"?matchProgress(raw):raw,h=world.clubs.find(c=>c.id===m.homeId),a=world.clubs.find(c=>c.id===m.awayId);if(!h||!a)return"";return `<article class="match-card ${m.status}"><div class="match-team">${crest(h)}<b>${esc(h.name)}</b></div><div class="match-score"><strong>${m.homeGoals} – ${m.awayGoals}</strong><small>${m.status==="finished"?"FT":m.elapsed+"’ / 90’"}</small>${m.status==="finished"&&m.penaltyScore?'<small>Strafschoppen '+m.penaltyScore.home+' – '+m.penaltyScore.away+'</small>':""}</div><div class="match-team away">${crest(a)}<b>${esc(a.name)}</b></div><div class="match-events">${(m.events||[]).slice(-3).map(e=>`<p><b>${e.minute}’</b> ${esc(e.text)}</p>`).join("")}</div></article>`}
 function render(){if(!user)return authScreen();if(!profile)return onboarding();if(!world){$("#app").innerHTML='<div class="loading">Competitie laden…</div>';return}const c=myClub();if(c){c.market=world.market||[];c.stadiumLevel=c.stadiumLevel||1;c.academyLevel=c.academyLevel||1;c.balance=c.balance??250000;c.players=(c.players||[]).map(p=>({...p,contractYears:p.contractYears??2,wage:p.wage??(p.rating*22),value:p.value??(p.rating*6000),potential:p.potential??Math.min(99,p.rating+8)}));}if(!c){$("#app").innerHTML='<div class="loading">Je club wordt gekoppeld…</div>';return}
 const nav=[["home","Overzicht"],["leagues","Competities"],["matches","Wedstrijden"],["squad","Spelers"],["lineup","Opstelling"],["tactics","Tactieken"],["training","Training"],["market","Transfermarkt"],["stadium","Stadion"],["finance","Financiën"],["club","Mijn club"]];
 let body="";
-const myMatch=liveMatches().find(m=>m.homeId===c.id||m.awayId===c.id);const playoffMatch=matches.find(m=>m.id==="s"+world.season+"-playoff");const showPlayoff=["playoff","playoff-finished"].includes(world.phase)?playoffMatch:null;const otherFinished=liveMatches().filter(m=>m.status==="finished"&&m.id!==myMatch?.id);
+const myMatch=liveMatches().find(m=>m.homeId===c.id||m.awayId===c.id);const playoffMatch=matches.find(m=>m.id==="s"+world.season+"-playoff");const showPlayoff=["playoff","playoff-finished"].includes(world.phase)?playoffMatch:null;const otherFinished=liveMatches().filter(m=>m.status==="precomputed"?matchProgress(m).status==="finished":m.status==="finished").map(m=>m.status==="precomputed"?matchProgress(m):m).filter(m=>m.id!==myMatch?.id);
 if(view==="home"){body=`<section class="welcome"><div><small>SEIZOEN ${world.season} · SPEELDAG ${world.matchday}/18</small><h1>${esc(c.name)}</h1><p>${divName(c.division)} · ${c.isBot?"Computerclub":"Jouw club"}</p></div>${crest(c,true)}</section><section class="stats"><div><small>PUNTEN</small><b>${c.points}</b></div><div><small>GESPEELD</small><b>${c.played}</b></div><div><small>DOELSALDO</small><b>${c.gf-c.ga}</b></div><div><small>SEIZOEN</small><b>${world.season}</b></div></section><section class="panel"><div class="panel-head"><div><h2>Speeldag ${world.matchday}</h2><p>Start hier de wedstrijden van deze speeldag.</p></div>${world.phase==="season-end"?'<button class="primary" id="finish-season">Start promotie-play-off</button>':world.phase==="playoff-finished"?'<button class="primary" id="finish-new-season">Nieuw Seizoen</button>':world.phase==="regular"&&world.matchday<=18?'<button class="primary" id="start-day">Speeldag starten</button>':world.phase==="live"?'<button class="secondary" disabled>Speeldag bezig…</button>':'<span class="sub">Geen speeldag beschikbaar · status: '+esc(world.phase)+'</span>'}</div>${showPlayoff?matchCard(showPlayoff):myMatch?matchCard(myMatch):'<p class="empty">Klik op “Speeldag starten” wanneer jij klaar bent. De wedstrijden duren ongeveer vijf echte minuten.</p>'}</section><section class="panel"><div class="panel-head"><div><h2>${divName(c.division)}</h2><p>Jouw huidige klasse</p></div></div>${table(c.division)}</section>`}
 if(view==="leagues"){body=`<section class="panel"><h2>Afgewerkte uitslagen</h2>${otherFinished.length?otherFinished.map(matchCard).join(""):'<p class="empty">Andere uitslagen verschijnen na afloop.</p>'}</section><section class="panel"><h2>Eerste Klasse</h2><p class="sub">10 clubs · De laatste drie degraderen rechtstreeks.</p>${table("first")}</section><section class="panel"><h2>Tweede Klasse A</h2><p class="sub">De kampioen promoveert. De nummer twee speelt een promotiewedstrijd.</p>${table("secondA")}</section><section class="panel"><h2>Tweede Klasse B</h2><p class="sub">De kampioen promoveert. De nummer twee speelt een promotiewedstrijd.</p>${table("secondB")}</section><section class="panel"><h2>Promotie en degradatie</h2><p>De drie laatste clubs uit Eerste Klasse degraderen. De kampioenen van Tweede Klasse A en B promoveren rechtstreeks. De nummers twee spelen één beslissende wedstrijd om het derde promotieticket.</p><p>Computerclubs die op een degradatieplaats eindigen, degraderen ook. Daardoor kan het aantal menselijke clubs dat zakt lager zijn.</p></section>`}
 if(view==="matches"){const showMatch=showPlayoff||myMatch;body=`<section class="panel"><div class="panel-head"><div><h2>${["playoff","playoff-finished"].includes(world.phase)?"Promotie-play-off":"Mijn wedstrijd · Speeldag "+world.matchday}</h2><p class="sub">${showPlayoff?"De promotie-play-off wordt voor iedereen getoond.":"Alleen jouw eigen wedstrijd wordt getoond."}</p></div>${world.phase==="regular"&&world.matchday<=18?'<button class="primary" id="start-day">Speeldag starten</button>':world.phase==="live"?'<span class="season-tag">Speeldag bezig</span>':""}</div>${showMatch?matchCard(showMatch):world.phase==="regular"?'<p class="empty">Er is nog geen wedstrijd gestart. Klik op “Speeldag starten” om alle wedstrijden te beginnen.</p>':'<p class="empty">Er is momenteel geen wedstrijd beschikbaar.</p>'}</section>`}

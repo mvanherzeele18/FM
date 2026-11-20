@@ -1,10 +1,10 @@
 // Firebase web app configuration. This is public client configuration.
 export const firebaseConfig = {
-  apiKey: "AIzaSyB919F9HeJfnywDGdC5dy_P72g8cJD2wUg",
-  authDomain: "football-manager-fm.firebaseapp.com",
-  projectId: "football-manager-fm",
-  storageBucket: "football-manager-fm.firebasestorage.app",
-  messagingSenderId: "1047046137510",
-  appId: "1:1047046137510:web:a710886dff48d269f5b667",
-  measurementId: "G-F4W3Y8VGJ0"
+    apiKey: "AIzaSyBSnOouE7TkdVA_oFIuGEw4YWQAZNa3n4I",
+    authDomain: "football-manager-fm-6f7b0.firebaseapp.com",
+    projectId: "football-manager-fm-6f7b0",
+    storageBucket: "football-manager-fm-6f7b0.firebasestorage.app",
+    messagingSenderId: "541964450510",
+    appId: "1:541964450510:web:aff2c116dfc03e66b0ee9f",
+    measurementId: "G-E2SV0G91BV"
 };
